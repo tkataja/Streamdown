@@ -77,7 +77,9 @@ Syntax  = "native"
 """
 
 def ensure_config_file(config):
-    config_dir = appdirs.user_config_dir("streamdown")
+    # Prefer XDG config: ~/.config/streamdown
+    xdg_config_home = os.environ.get("XDG_CONFIG_HOME", os.path.join(os.path.expanduser("~"), ".config"))
+    config_dir = os.path.join(xdg_config_home, "streamdown")
     os.makedirs(config_dir, exist_ok=True)
     config_path = os.path.join(config_dir, "config.toml")
     if not os.path.exists(config_path):
@@ -530,7 +532,8 @@ def line_format(line):
                 state.code_buffer_raw = ''
 
             if state.inline_code:
-                result += f'{BG}{Style.Mid}'
+                # Avoid forcing a background unless pretty padding is enabled
+                result += (f'{BG}{Style.Mid}' if Style.PrettyPad else '')
             else:
                 result += state.bg
                 state.code_buffer_raw = ''
@@ -735,7 +738,8 @@ def parse(stream):
                 state.code_buffer = state.code_buffer_raw = ""
                 state.code_gen = 0
                 state.code_first_line = True
-                state.bg = f"{BG}{Style.Dark}"
+                # Only force a background in pretty pad mode; otherwise inherit terminal bg
+                state.bg = f"{BG}{Style.Dark}" if Style.PrettyPad else BGRESET
                 state.where_from = "code pad"
                 if Style.PrettyPad or Style.PrettyBroken:
                     if not Style.PrettyPad:
@@ -1106,7 +1110,7 @@ def main():
     https://github.com/day50-dev/Streamdown
 
     paths:
-      config                {os.path.join(appdirs.user_config_dir('streamdown'), 'config.toml')}
+      config                {os.path.join(os.environ.get('XDG_CONFIG_HOME', os.path.join(os.path.expanduser('~'), '.config')), 'streamdown', 'config.toml')}
       logs                  {gettmpdir()}
     """))
     parser.add_argument("filenameList", nargs="*", help="Input file to process (also takes stdin)")
@@ -1161,7 +1165,9 @@ def main():
     Style.Blockquote = f"{FG}{Style.Grey}│ "
     width_calc()
 
-    Style.Codebg = f"{BG}{Style.Dark}"
+    # Only set a background for code blocks when pretty padding is enabled.
+    # Otherwise avoid forcing background so light terminals don't get dark blocks.
+    Style.Codebg = f"{BG}{Style.Dark}" if Style.PrettyPad else ""
     Style.Link = f"{FG}{Style.Symbol}{UNDERLINE[0]}"
 
     logging.basicConfig(stream=sys.stdout, level=args.loglevel.upper(), format=f'%(message)s')
