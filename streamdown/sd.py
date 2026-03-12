@@ -532,10 +532,11 @@ def line_format(line):
                 state.code_buffer_raw = ''
 
             if state.inline_code:
-                # Avoid forcing a background unless pretty padding is enabled
-                result += (f'{BG}{Style.Mid}' if Style.PrettyPad else '')
+                # Inline code needs an explicit foreground so it stays readable
+                # even when the terminal default text color is dark.
+                result += (f'{BG}{Style.Mid}' if Style.PrettyPad else '') + Style.InlineCodeFg
             else:
-                result += state.bg
+                result += f"{state.bg}{FGRESET}"
                 state.code_buffer_raw = ''
    
         # This is important here because we ignore formatting
@@ -1070,6 +1071,13 @@ def ansi2hex(ansi_code):
     r, g, b = map(int, parts)
     return f"#{r:02x}{g:02x}{b:02x}"
 
+def ansi_contrast_foreground(ansi_code):
+    parts = ansi_code.strip('m').split(";")
+    r, g, b = map(int, parts)
+    luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
+    contrast = "255;255;255m" if luminance < 140 else "0;0;0m"
+    return f"{FG}{contrast}"
+
 def apply_multipliers(style, name, H, S, V):
     m = style.get(name)
     r, g, b = colorsys.hsv_to_rgb(min(1.0, H * m["H"]), min(1.0, S * m["S"]), min(1.0, V * m["V"]))
@@ -1168,6 +1176,7 @@ def main():
     # Only set a background for code blocks when pretty padding is enabled.
     # Otherwise avoid forcing background so light terminals don't get dark blocks.
     Style.Codebg = f"{BG}{Style.Dark}" if Style.PrettyPad else ""
+    Style.InlineCodeFg = ansi_contrast_foreground(Style.Mid)
     Style.Link = f"{FG}{Style.Symbol}{UNDERLINE[0]}"
 
     logging.basicConfig(stream=sys.stdout, level=args.loglevel.upper(), format=f'%(message)s')
