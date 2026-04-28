@@ -265,8 +265,12 @@ def format_table(rowList):
     width_mod  = available_width % num_cols
 
     col_width_list = [width_base + (1 if i < width_mod else 0) for i in range(num_cols)]
-    bg_color = Style.Mid if state.in_table == Style.Head else Style.Dark
-    state.bg = f"{BG}{bg_color}"
+    is_header = state.in_table == Style.Head
+    bg_color = Style.Mid if is_header else None
+    table_bg = f"{BG}{bg_color}" if bg_color else ""
+    table_fg = ansi_contrast_foreground(bg_color) if bg_color else FGRESET
+    border = f"{table_bg}{FG}{Style.Symbol}│{table_bg}{table_fg}"
+    state.bg = table_bg if table_bg else BGRESET
 
     # First Pass: Wrap text and calculate row heights
     # Note this is where every cell is formatted so if 
@@ -284,8 +288,6 @@ def format_table(rowList):
 
     # --- Second Pass: Format and emit rows ---
     for ix in range(row_height):
-        # This is the fancy row separator
-        extra = f"\033[4;58;2;{Style.Mid}" if not state.in_table == Style.Head and (ix == row_height - 1) else ""
         line_segments = []
 
         # Now we want to snatch this row index from all our cells
@@ -298,12 +300,12 @@ def format_table(rowList):
             # Margin logic is correctly indented here
             margin_needed = col_width_list[iy] - visible_length(segment)
             margin_segment = segment + (" " * max(0, margin_needed))
-            line_segments.append(f"{BG}{bg_color}{extra} {margin_segment}")
+            line_segments.append(f"{table_bg}{table_fg} {margin_segment}")
 
         # Correct indentation: This should be outside the c_idx loop
-        joined_line = f"{BG}{bg_color}{extra}{FG}{Style.Symbol}│{RESET}".join(line_segments)
+        joined_line = border.join(line_segments)
         # Correct indentation and add missing characters
-        yield f"{state.space_left()}{FGRESET}{joined_line}{RESET}"
+        yield f"{state.space_left()}{joined_line}{RESET}"
 
     state.bg = BGRESET
 
