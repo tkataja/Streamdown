@@ -74,6 +74,9 @@ Head    = { H = 1.00, S = 1.00, V = 1.75 }
 Grey    = { H = 1.00, S = 0.25, V = 1.37 }
 Bright  = { H = 1.00, S = 0.60, V = 2.00 }
 Syntax  = "native"
+LightSyntax = "xcode"
+TerminalTheme = "auto" # auto, dark, light
+ReadableForegrounds = true
 """
 
 def ensure_config_file(config):
@@ -891,6 +894,8 @@ def parse(stream):
                     ## this is the crucial counter that will determine
                     # the beginning of the next line
                     state.code_gen = len(highlighted_code)
+                    if Style.ReadableForegrounds:
+                        this_batch = readable_ansi_foregrounds(this_batch, Style.Dark)
                     code_line = ' ' * indent + this_batch.strip()
 
                     margin = state.full_width( -len(pre[1]) ) - visible_length(code_line) % state.WidthFull
@@ -1066,17 +1071,105 @@ def emit(inp):
     if len(buffer):
         print(buffer.pop(0), file=sys.stdout, end="", flush=True)
 
+def ansi_rgb(ansi_code):
+    return tuple(map(int, ansi_code.strip('m').split(";")))
+
+def rgb_ansi(rgb):
+    return ';'.join(str(int(x)) for x in rgb) + "m"
+
 def ansi2hex(ansi_code):
-    parts = ansi_code.strip('m').split(";")
-    r, g, b = map(int, parts)
+    r, g, b = ansi_rgb(ansi_code)
     return f"#{r:02x}{g:02x}{b:02x}"
 
+def relative_luminance(rgb):
+    def channel(value):
+        value = value / 255
+        return value / 12.92 if value <= 0.04045 else ((value + 0.055) / 1.055) ** 2.4
+
+    r, g, b = [channel(value) for value in rgb]
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+def contrast_ratio(rgb_a, rgb_b):
+    lum_a = relative_luminance(rgb_a)
+    lum_b = relative_luminance(rgb_b)
+    return (max(lum_a, lum_b) + 0.05) / (min(lum_a, lum_b) + 0.05)
+
 def ansi_contrast_foreground(ansi_code):
-    parts = ansi_code.strip('m').split(";")
-    r, g, b = map(int, parts)
-    luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
-    contrast = "255;255;255m" if luminance < 140 else "0;0;0m"
-    return f"{FG}{contrast}"
+    rgb = ansi_rgb(ansi_code)
+    white = (255, 255, 255)
+    black = (0, 0, 0)
+    contrast = white if contrast_ratio(rgb, white) >= contrast_ratio(rgb, black) else black
+    return f"{FG}{rgb_ansi(contrast)}"
+
+def ansi_safe_foreground(ansi_code, minimum=4.5):
+    """Keep configured foreground colors readable on common light and dark terminals."""
+    rgb = ansi_rgb(ansi_code)
+    backgrounds = [(255, 255, 255), (0, 0, 0)]
+    if all(contrast_ratio(rgb, bg) >= minimum for bg in backgrounds):
+        return ansi_code
+
+    h, s, v = colorsys.rgb_to_hsv(*(channel / 255 for channel in rgb))
+    best = None
+    fallback = None
+    for step in range(256):
+        candidate_v = step / 255
+        candidate = tuple(int(channel * 255) for channel in colorsys.hsv_to_rgb(h, s, candidate_v))
+        min_contrast = min(contrast_ratio(candidate, bg) for bg in backgrounds)
+        distance = abs(candidate_v - v)
+        candidate_score = (distance, -min_contrast)
+
+        if fallback is None or min_contrast > fallback[0]:
+            fallback = (min_contrast, candidate)
+        if min_contrast >= minimum and (best is None or candidate_score < best[0]):
+            best = (candidate_score, candidate)
+
+    return rgb_ansi(best[1] if best else fallback[1])
+
+def ansi_safe_foreground_on(ansi_code, background_ansi, minimum=4.5):
+    """Adjust a foreground color just enough to read against a specific background."""
+    rgb = ansi_rgb(ansi_code)
+    background = ansi_rgb(background_ansi)
+    if contrast_ratio(rgb, background) >= minimum:
+        return ansi_code
+
+    h, s, v = colorsys.rgb_to_hsv(*(channel / 255 for channel in rgb))
+    best = None
+    fallback = (contrast_ratio(rgb, background), rgb)
+    for step in range(256):
+        candidate_v = step / 255
+        candidate = tuple(int(channel * 255) for channel in colorsys.hsv_to_rgb(h, s, candidate_v))
+        candidate_contrast = contrast_ratio(candidate, background)
+        candidate_score = (abs(candidate_v - v), -candidate_contrast)
+
+        if candidate_contrast > fallback[0]:
+            fallback = (candidate_contrast, candidate)
+        if candidate_contrast >= minimum and (best is None or candidate_score < best[0]):
+            best = (candidate_score, candidate)
+
+    return rgb_ansi(best[1] if best else fallback[1])
+
+def readable_ansi_foregrounds(text, background_ansi, minimum=4.5):
+    """Clamp truecolor foreground escape codes so syntax highlighting stays readable."""
+    def replace(match):
+        ansi_code = f"{match.group(1)};{match.group(2)};{match.group(3)}m"
+        return f"{FG}{ansi_safe_foreground_on(ansi_code, background_ansi, minimum)}"
+
+    return re.sub(r"\033\[38;2;(\d+);(\d+);(\d+)m", replace, text)
+
+def terminal_theme_from_env():
+    explicit = os.environ.get("STREAMDOWN_THEME")
+    if explicit in ["dark", "light"]:
+        return explicit
+
+    colorfgbg = os.environ.get("COLORFGBG", "")
+    try:
+        background = int(colorfgbg.split(";")[-1])
+        return "dark" if background in range(0, 7) or background == 8 else "light"
+    except (ValueError, IndexError):
+        return "dark"
+
+def resolve_terminal_theme(theme):
+    return terminal_theme_from_env() if theme == "auto" else theme
 
 def apply_multipliers(style, name, H, S, V):
     m = style.get(name)
@@ -1126,6 +1219,7 @@ def main():
     parser.add_argument("-b", "--base", default=None, help="Set the hsv base: h,s,v")
     parser.add_argument("-c", "--config", default=None, help="Use a custom config override")
     parser.add_argument("-w", "--width", default="0", help="Set the width WIDTH")
+    parser.add_argument("--theme", choices=["auto", "dark", "light"], help="Set terminal theme for readable colors")
     parser.add_argument("-e", "--exec", help="Wrap a program EXEC for more 'proper' i/o handling")
     parser.add_argument("-s", "--scrape", help="Scrape code snippets to a directory SCRAPE")
     parser.add_argument("-v", "--version", action="store_true", help="Show version information")
@@ -1147,6 +1241,8 @@ def main():
 
     config = ensure_config_file(args.config)
     style = toml.loads(default_toml).get('style') | config.get("style", {})
+    if args.theme:
+        style["TerminalTheme"] = args.theme
     features = toml.loads(default_toml).get('features') | config.get("features", {})
     H, S, V = style.get("HSV")
 
@@ -1158,8 +1254,17 @@ def main():
 
     for color in ["Dark", "Mid", "Symbol", "Head", "Grey", "Bright"]:
         setattr(Style, color, apply_multipliers(style, color, H, S, V))
+    Style.ReadableForegrounds = style.get("ReadableForegrounds", True)
+    if Style.ReadableForegrounds:
+        for color in ["Symbol", "Head", "Grey", "Bright"]:
+            setattr(Style, color, ansi_safe_foreground(getattr(Style, color)))
     for attr in ['PrettyPad', 'PrettyBroken', 'Margin', 'ListIndent', 'Syntax']:
         setattr(Style, attr, style.get(attr))
+    Style.TerminalTheme = resolve_terminal_theme(style.get("TerminalTheme", "auto"))
+    if Style.TerminalTheme == "light":
+        Style.Dark = "238;238;238m"
+        Style.Mid = "226;226;226m"
+        Style.Syntax = style.get("LightSyntax", "xcode")
     for attr in ['Links', 'Images', 'CodeSpaces', 'Clipboard', 'Logging', 'Timeout', 'Savebrace']:
         setattr(state, attr, features.get(attr))
 

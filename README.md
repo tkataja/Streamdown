@@ -90,12 +90,16 @@ The default values are [at the beginning of the source](https://github.com/krist
 *   `PrettyBroken` (boolean, default: `true`): This will break the copy/paste assurance above. The output is much prettier, but it's also broken. So it's pretty broken. Works nicely with PrettyPad.
 *   `ListIndent` (integer, default: `2`): This is the recursive indent for the list styles.
 *   `Syntax` (string, default `native`): This is the syntax [highlighting theme which come via pygments](https://pygments.org/styles/).
+*   `LightSyntax` (string, default `xcode`): Syntax theme used when `TerminalTheme` resolves to `light`.
+*   `TerminalTheme` (string, default `auto`): Use `light` for light terminal backgrounds, `dark` for dark backgrounds, or `auto` to infer from `$COLORFGBG`. Light mode uses light gray code backgrounds and stronger heading/link colors.
+*   `ReadableForegrounds` (boolean, default `true`): Adjusts accent colors when needed so headings, links, bullets, and blockquote bars stay readable on both light and dark backgrounds.
 
 Example:
 ```toml
 [style]
 PrettyPad = true
 PrettyBroken = true
+TerminalTheme = "light" # Use light gray code backgrounds on light terminals
 HSV = [0.7, 0.5, 0.5]
 Dark = { H = 1.0, S = 1.2, V = 0.25 } # Make dark elements less saturated and darker
 Symbol = { H = 1.0, S = 1.8, V = 1.8 } # Make symbols more vibrant
@@ -157,6 +161,8 @@ optional arguments:
                         Use a custom config override
   -w WIDTH, --width WIDTH
                         Set the width WIDTH
+  --theme {auto,dark,light}
+                        Set terminal theme for readable colors
   -e EXEC, --exec EXEC  Wrap a program EXEC for more 'proper' i/o handling
   -s SCRAPE, --scrape SCRAPE
                         Scrape code snippets to a directory SCRAPE
