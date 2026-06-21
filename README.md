@@ -31,6 +31,8 @@ Set `PrettyBroken` and `PrettyPad` to False in your toml (see below) to make Str
 
 
 ### Supports images
+Image previews are available with `--images` or `Images = true`. They are off by default so streaming text stays fast.
+
 Here's kitty and alacritty. 
 ![doggie](https://github.com/user-attachments/assets/81c43983-68cd-40c1-b1d5-aa3a52004504)
 
@@ -91,7 +93,7 @@ The default values are [at the beginning of the source](https://github.com/krist
 *   `ListIndent` (integer, default: `2`): This is the recursive indent for the list styles.
 *   `Syntax` (string, default `native`): This is the syntax [highlighting theme which come via pygments](https://pygments.org/styles/).
 *   `LightSyntax` (string, default `xcode`): Syntax theme used when `TerminalTheme` resolves to `light`.
-*   `TerminalTheme` (string, default `auto`): Use `light` for light terminal backgrounds, `dark` for dark backgrounds, or `auto` to infer from `$COLORFGBG`. Light mode uses light gray code backgrounds and stronger heading/link colors.
+*   `TerminalTheme` (string, default `auto`): Use `light` for light terminal backgrounds, `dark` for dark backgrounds, or `auto` to infer from `$COLORFGBG`. When the terminal does not expose background colors, `auto` falls back to light mode for safer readability. Light mode uses light gray code backgrounds and stronger heading/link colors.
 *   `ReadableForegrounds` (boolean, default `true`): Adjusts accent colors when needed so headings, links, bullets, and blockquote bars stay readable on both light and dark backgrounds.
 
 Example:
@@ -112,6 +114,7 @@ Controls optional features:
 *   `CodeSpaces` (boolean, default: `true`): Enables detection of code blocks indented with 4 spaces. Set to `false` to disable this detection method (triple-backtick blocks still work).
 *   `Clipboard` (boolean, default: `true`): Enables copying the last code block encountered to the system clipboard using OSC 52 escape sequences upon exit. Set to `false` to disable.
 *   `Logging` (boolean, default: `false`): Enables logging to tmpdir (/tmp/sd) of the raw markdown for debugging and bug reporting. The logging uses an emoji as a record separator so the actual streaming delays can be simulated and replayed. If you use the `filename` based invocation, that is to say, `sd <filename>`, this type of logging is always off.
+*   `Images` (boolean, default: `false`): Enables terminal image previews. Keep this off for the snappiest streaming output; use `--images` when you want previews.
 *   `Savebrace` (boolean, default: `true`): Saves the code blocks of a conversation to the append file `$TMP/sd/$UID/savebrace` so you can `fzf` or whatever you want through it. See how it's used in DAY50's [sidechat](https://github.com/day50-dev/sidechat).
 
 Example:
@@ -139,7 +142,8 @@ $ sd -c <(echo "[style]\nMargin=10")
 To override the margin.
 
 ```shell
-usage: sd [-h] [-l LOGLEVEL] [-b BASE] [-c CONFIG] [-w WIDTH] [-e EXEC]
+usage: sd [-h] [-l LOGLEVEL] [-b BASE] [-c CONFIG] [-w WIDTH]
+          [--theme {auto,dark,light}] [--images | --no-images] [-e EXEC]
           [-s SCRAPE] [filenameList ...]
 
 Streamdown is a streaming markdown renderer for modern terminals.
@@ -163,6 +167,8 @@ optional arguments:
                         Set the width WIDTH
   --theme {auto,dark,light}
                         Set terminal theme for readable colors
+  --images              Render image previews
+  --no-images           Skip image previews for faster streaming
   -e EXEC, --exec EXEC  Wrap a program EXEC for more 'proper' i/o handling
   -s SCRAPE, --scrape SCRAPE
                         Scrape code snippets to a directory SCRAPE

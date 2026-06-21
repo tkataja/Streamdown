@@ -33,7 +33,6 @@ import colorsys
 import base64
 import subprocess
 from io import BytesIO
-from term_image.image import from_file, from_url
 import pygments.util
 from wcwidth import wcwidth
 from functools import reduce
@@ -57,7 +56,7 @@ Clipboard  = true
 Logging    = false
 Timeout    = 0.1
 Savebrace  = true
-Images     = true
+Images     = false
 Links      = true
 
 [style]
@@ -488,12 +487,16 @@ def line_format(line):
     def process_images(match):
         url = match.group(2)
         try:
+            # term-image is intentionally imported lazily: image rendering can be
+            # slow, and normal streaming text should stay snappy.
+            from term_image.image import from_file, from_url
             if re.match(r"https://", url.lower()):
                 image = from_url(url)
             else: 
                 image = from_file(url)
-            image.height = 20
+            image.height = 12
             print(f"{image:|.-1#}")
+            return ""
         except:
             return match.group(2)
 
@@ -837,59 +840,64 @@ def parse(stream):
                 pre = [state.space_left(listwidth = True), '  '] if Style.PrettyBroken else ['', '']
 
                 for tline in line_wrap:
-                    # wrap-around is a bunch of tricks. We essentially format longer and longer portions of code. The problem is
-                    # the length can change based on look-ahead context so we need to use our expected place (state.code_gen) and
-                    # then naively search back until our visible_lengths() match. This is not fast and there's certainly smarter
-                    # ways of doing it but this thing is way trickery than you think
-                    highlighted_code = highlight(state.code_buffer + tline, lexer, formatter)
-                    #print("(",bytes(highlighted_code,'utf-8'),")")
-                    parts = split_up(highlighted_code)
+                    if len(line_wrap) == 1:
+                        highlighted_code = highlight(tline, lexer, formatter)
+                        this_batch = re.sub(r"\033\[[34]9(;00|)m", FORMATRESET, highlighted_code).rstrip('\r\n')
+                        state.code_buffer += tline
+                    else:
+                        # wrap-around is a bunch of tricks. We essentially format longer and longer portions of code. The problem is
+                        # the length can change based on look-ahead context so we need to use our expected place (state.code_gen) and
+                        # then naively search back until our visible_lengths() match. This is not fast and there's certainly smarter
+                        # ways of doing it but this thing is way trickery than you think
+                        highlighted_code = highlight(state.code_buffer + tline, lexer, formatter)
+                        #print("(",bytes(highlighted_code,'utf-8'),")")
+                        parts = split_up(highlighted_code)
 
-                    # Sometimes the highlighter will do things like a full reset or a background reset.
-                    # This is mostly not what we want
-                    parts = [ re.sub(r"\033\[[34]9(;00|)m", FORMATRESET, x) for x in parts]
-    
-                    # Since we are streaming we ignore the resets and newlines at the end
-                    while parts[-1] in [FGRESET, FORMATRESET]:
-                        parts.pop()
+                        # Sometimes the highlighter will do things like a full reset or a background reset.
+                        # This is mostly not what we want
+                        parts = [ re.sub(r"\033\[[34]9(;00|)m", FORMATRESET, x) for x in parts]
+        
+                        # Since we are streaming we ignore the resets and newlines at the end
+                        while parts[-1] in [FGRESET, FORMATRESET]:
+                            parts.pop()
 
-                    tline_len = visible_length(tline.rstrip('\r\n'))
+                        tline_len = visible_length(tline.rstrip('\r\n'))
 
-                    # now we find the new stuff:
-                    ttl = 0
-                    for i in range(len(parts)-1, 0, -1):
-                        idx = parts[i]
-                        if len(idx) == 0:
-                            continue
+                        # now we find the new stuff:
+                        ttl = 0
+                        for i in range(len(parts)-1, 0, -1):
+                            idx = parts[i]
+                            if len(idx) == 0:
+                                continue
 
-                        ttl += len(idx) if idx[0] != '\x1b' else 0
+                            ttl += len(idx) if idx[0] != '\x1b' else 0
 
-                        if ttl > tline_len:
-                            break
+                            if ttl > tline_len:
+                                break
 
 
-                    newlen = visible_length("".join(parts[i:]))
+                        newlen = visible_length("".join(parts[i:]))
 
-                    snipfrom = newlen - len(tline) + 2
-                    # this is all getting replaced with the new lexer so let's give a cheap
-                    # fix for now:
-                    if snipfrom == 1:
-                        snipfrom = 0
+                        snipfrom = newlen - len(tline) + 2
+                        # this is all getting replaced with the new lexer so let's give a cheap
+                        # fix for now:
+                        if snipfrom == 1:
+                            snipfrom = 0
 
-                    if snipfrom > 0:
-                        parts[i] = parts[i][snipfrom:]
+                        if snipfrom > 0:
+                            parts[i] = parts[i][snipfrom:]
 
-                    state.code_buffer += tline
-                    this_batch = "".join(parts[i:])
+                        state.code_buffer += tline
+                        this_batch = "".join(parts[i:])
 
-                    if this_batch.startswith(FGRESET):
-                        this_batch = this_batch[len(FGRESET) :]
+                        if this_batch.startswith(FGRESET):
+                            this_batch = this_batch[len(FGRESET) :]
 
-                    # clean it before prepending with potential format 
-                    this_batch = this_batch.strip()
-                    while i - 1 >= 0 and parts[i-1] and parts[i-1][0] == '\x1b':
-                         this_batch = parts[i-1] + this_batch
-                         i -= 1
+                        # clean it before prepending with potential format 
+                        this_batch = this_batch.strip()
+                        while i - 1 >= 0 and parts[i-1] and parts[i-1][0] == '\x1b':
+                             this_batch = parts[i-1] + this_batch
+                             i -= 1
 
                     ## this is the crucial counter that will determine
                     # the beginning of the next line
@@ -899,7 +907,7 @@ def parse(stream):
                     code_line = ' ' * indent + this_batch.strip()
 
                     margin = state.full_width( -len(pre[1]) ) - visible_length(code_line) % state.WidthFull
-                    yield f"{pre[0]}{Style.Codebg}{pre[1]}{code_line}{FORMATRESET}{' ' * max(0, margin)}{BGRESET}"  
+                    yield f"{pre[0]}{Style.Codebg}{Style.CodeFg}{pre[1]}{code_line}{FORMATRESET}{' ' * max(0, margin)}{BGRESET}{FGRESET}"  
                 continue
             except Goto:
                 pass
@@ -1166,7 +1174,7 @@ def terminal_theme_from_env():
         background = int(colorfgbg.split(";")[-1])
         return "dark" if background in range(0, 7) or background == 8 else "light"
     except (ValueError, IndexError):
-        return "dark"
+        return "light"
 
 def resolve_terminal_theme(theme):
     return terminal_theme_from_env() if theme == "auto" else theme
@@ -1220,6 +1228,9 @@ def main():
     parser.add_argument("-c", "--config", default=None, help="Use a custom config override")
     parser.add_argument("-w", "--width", default="0", help="Set the width WIDTH")
     parser.add_argument("--theme", choices=["auto", "dark", "light"], help="Set terminal theme for readable colors")
+    image_group = parser.add_mutually_exclusive_group()
+    image_group.add_argument("--images", action="store_true", help="Render image previews")
+    image_group.add_argument("--no-images", action="store_true", help="Skip image previews for faster streaming")
     parser.add_argument("-e", "--exec", help="Wrap a program EXEC for more 'proper' i/o handling")
     parser.add_argument("-s", "--scrape", help="Scrape code snippets to a directory SCRAPE")
     parser.add_argument("-v", "--version", action="store_true", help="Show version information")
@@ -1244,6 +1255,10 @@ def main():
     if args.theme:
         style["TerminalTheme"] = args.theme
     features = toml.loads(default_toml).get('features') | config.get("features", {})
+    if args.images:
+        features["Images"] = True
+    if args.no_images:
+        features["Images"] = False
     H, S, V = style.get("HSV")
 
     if args.base:
@@ -1282,6 +1297,7 @@ def main():
     # Otherwise avoid forcing background so light terminals don't get dark blocks.
     Style.Codebg = f"{BG}{Style.Dark}" if Style.PrettyPad else ""
     Style.InlineCodeFg = ansi_contrast_foreground(Style.Mid)
+    Style.CodeFg = ansi_contrast_foreground(Style.Dark)
     Style.Link = f"{FG}{Style.Symbol}{UNDERLINE[0]}"
 
     logging.basicConfig(stream=sys.stdout, level=args.loglevel.upper(), format=f'%(message)s')
